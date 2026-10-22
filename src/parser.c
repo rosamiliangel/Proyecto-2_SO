@@ -9,7 +9,12 @@
 static int comparar_tasks_por_llegada(const void *a, const void *b){
     TCB *taskA = *(TCB**)a;
     TCB *taskB = *(TCB**)b;
-    return taskA->arrivalTime - taskB->arrivalTime;
+    
+    if(taskA->arrivalTime != taskB->arrivalTime){
+        return taskA->arrivalTime - taskB->arrivalTime;
+    }
+    // Si los tiempos de llegada son iguales, ordenar por prioridad
+    return taskA->priority - taskB->priority;
 }
 
 TCB** parser_parse_file(const char *filename, int *out_count){
