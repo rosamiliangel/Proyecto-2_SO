@@ -40,11 +40,11 @@ int main(int argc, char *argv[]){
     }
     printf("================================------------------\n\n");
 
-    Scheduler sched;
+    /*Scheduler sched;
     scheduler_init(&sched, tasks, task_count, verbose);
     scheduler_run(&sched);
     scheduler_destroy(&sched);
 
-    parser_free_tasks(tasks, task_count);
+    parser_free_tasks(tasks, task_count);*/
     return EXIT_SUCCESS;
 }
