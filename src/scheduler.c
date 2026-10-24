@@ -131,23 +131,21 @@ void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose) {
     sched->globalTick = 0;
     sched->verbose = verbose;
 
-    /*
     pthread_mutex_init(&sched->lock, NULL);
     pthread_barrier_init(&sched->barrier, NULL, 2); // 2 hilos: Maestro y CPU
-    */
 }
 
 /*
 void scheduler_run_oring(Scheduler *sched) {
-    pthread_t master_thread, worker_thread;
+    pthread_t hiloMaestro, hiloTrabajador;
 
-    // Crear los dos hilos requeridos[cite: 3]
-    pthread_create(&master_thread, NULL, master_thread_func, sched);
-    pthread_create(&worker_thread, NULL, worker_thread_func, sched);
+    // Crear los dos hilos requeridos
+    pthread_create(&hiloMaestro, NULL, master_thread_func, sched);
+    pthread_create(&hiloTrabajador, NULL, worker_thread_func, sched);
 
     // Esperar a que terminen la simulación
-    pthread_join(master_thread, NULL);
-    pthread_join(worker_thread, NULL);
+    pthread_join(hiloMaestro, NULL);
+    pthread_join(hiloTrabajador, NULL);
 
     printf("Simulación finalizada correctamente.\n");
 }
@@ -177,20 +175,83 @@ void scheduler_run(Scheduler *sched) {
             task->usedQuantum++;
             task->remainingBurst--;
 
+            int LimiteQuantum = (task->priority == 0) ? 2 : ((task->priority == 1) ? 4: 0);
+            int Apropiado = 0;
+            
+            if (task-> priority > 0 && !queue_is_empty(&sched->queue0)) {Apropiado = 1;}
+            if (task-> priority == 2 && !queue_is_empty(&sched->queue1)) {Apropiado = 1;}
+
+            if (task->remainingBurst == 0) {
+                task->state = STATE_FINISHED;
+                task->finishTime = sched->globalTick + 1;
+                task->returnTime = task->finishTime - task->arrivalTime;
+                sched->runningTask = NULL;
+                TareasCompletadas++;
+                if (sched->verbose) {printf("[T-%4d] COMPLETED: Sentinel ID: %d\n", sched->globalTick + 1, task->id);}
+            }
+            else if (LimiteQuantum >0 && task->usedQuantum == LimiteQuantum) {
+                task->usedQuantum = 0;
+                task->state = STATE_READY;
+                if (task->priority == 0) {queue_enqueue(&sched->queue0, task);}
+                else if (task->priority == 1) {queue_enqueue(&sched->queue1, task);}
+                sched->runningTask = NULL;
+                if (sched->verbose) {printf("[T-%4d] QUANTUM_EXPIRED: SENTINEL ID: %d\n", sched->globalTick + 1, task->id);}    
+            }
+            else if (Apropiado) {
+                task->state = STATE_INTERRUPTED;
+                if (task->priority == 1) {queue_push_front(&sched->queue1, task);}
+                else if (task->priority == 2) {queue_push_front(&sched->queue2, task);}
+                sched->runningTask = NULL;
+            }
         }
 
+        //Despacho de procesos
+        if (sched->runningTask == NULL) {
+            if (!queue_is_empty(&sched->queue0)) {sched->runningTask = queue_dequeue(&sched->queue0);}
+            else if (!queue_is_empty(&sched->queue1)) {sched->runningTask = queue_dequeue(&sched->queue1);}
+            else if (!queue_is_empty(&sched->queue2)) {sched->runningTask = queue_dequeue(&sched->queue2);}
+            
+            if (sched->runningTask != NULL) {
+                if (sched->runningTask->startTime == -1) {
+                    sched->runningTask->startTime = sched->globalTick;
+                    sched->runningTask->state = STATE_RUNNING;
+                }
+            }
+        }
+
+        // Avanzar reloj
+        sched->globalTick++;
 
     }
+    
+}
 
+void scheduler_print_metrics(Scheduler *sched){
+    int tareasTotales = sched->totalTasks;
+    int tiempoTotal = sched->globalTick; // Valor final de Tg
+    float rendimiento = (float) tareasTotales / tiempoTotal;
+    float tiempoDeEsperaTotal = 0;
+
+    for(int i = 0; i < tareasTotales; i++){
+        TCB *tarea = sched->allTasks[i];
+        // Tiempo de espera por tarea
+        int tiempoDeESpera = tarea->returnTime - tarea->totalBurst;
+        tiempoDeEsperaTotal += tiempoDeESpera;
+    }
+    // Calcular el tiempo de espera promedio
+    float tiempoDeEsperaPromedio = tiempoDeEsperaTotal / tareasTotales;
+    // Mostrar las metricas
+    printf("\n====== GLOBAL PERFORMANCE METRICS ======\n");
+    printf("Total Simulation Time : %d clock ticks.\n", tiempoTotal);
+    printf("System Throughput : %.2f sentinels/tick.\n", rendimiento);
+    printf("Average Waiting Time : %.2f ticks.\n", tiempoDeEsperaPromedio);
 }
 
 void scheduler_destroy(Scheduler *sched) {
     queue_clear(&sched->queue0);
     queue_clear(&sched->queue1);
     queue_clear(&sched->queue2);
-
-    /*
+    
     pthread_mutex_destroy(&sched->lock);
     pthread_barrier_destroy(&sched->barrier);
-    */
 }
