@@ -4,13 +4,40 @@
 
 static void* master_thread_func(void *arg) {
     Scheduler *sched = (Scheduler*) arg;
-    // TODO: Hilo Maestro - Evaluar arribos por tic Tg[cite: 3]
+
+    pthread_mutex_lock(&sched->lock); // Protección de la sección crítica
+    for(int i = 0; i < sched->totalTasks; i++){
+        TCB *task = sched->allTasks[i];
+        // Si el centinela llega en el tic global actual
+        if(task->arrivalTime == sched->globalTick && task->state == STATE_NEW){
+            task->state = STATE_READY;
+            // Enrutar a la cola según su prioridad estricta
+            if(task->priority == 0){
+                queue_enqueue(&sched->queue0, task);
+                if(sched->verbose){
+                    printf("[T-%04d] ARRIVAL: Sentinel ID: %d [Type: Command]\n", sched->globalTick, task->id);
+                }
+            }else if(task->priority == 1){
+                queue_enqueue(&sched->queue1, task);
+                if(sched->verbose){
+                    printf("[T-%04d] ARRIVAL: Sentinel ID: %d [Type: Driller]\n", sched->globalTick, task->id);
+                }
+            }else if (task->priority == 2){
+                queue_enqueue(&sched->queue2, task);
+                if(sched->verbose){
+                    printf("[T-%04d] ARRIVAL: Sentinel ID: %d [Type: Heavy]\n", sched->globalTick, task->id);
+                }
+            }
+        }
+    }
+    pthread_mutex_unlock(&sched->lock); // Libere la sección crítica
+
     return NULL;
 }
 
 static void* worker_thread_func(void *arg) {
     Scheduler *sched = (Scheduler*) arg;
-    // TODO: Hilo CPU - Expiración, Expropiación, Despacho y Cómputo[cite: 2, 3]
+    // TODO: Hilo CPU - Expiración, Expropiación, Despacho y Cómputo
     return NULL;
 }
 
@@ -26,7 +53,7 @@ void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose) {
     sched->verbose = verbose;
 
     pthread_mutex_init(&sched->lock, NULL);
-    pthread_barrier_init(&sched->barrier, NULL, 2); // 2 hilos: Maestro y CPU[cite: 3]
+    pthread_barrier_init(&sched->barrier, NULL, 2); // 2 hilos: Maestro y CPU
 }
 
 void scheduler_run(Scheduler *sched) {
