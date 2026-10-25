@@ -34,8 +34,6 @@ static void* master_thread_func(void *arg) {
 
                 // Salida estandar
                 printf("[T-%04d] ARRIVAL: Sentinel ID: %d [Type: %s]\n", sched->globalTick, task->id, TiposPrioridad[task->priority]);
-                // Salida ampliada
-                //if (sched->verbose) {}
             }
         }
         
@@ -44,6 +42,38 @@ static void* master_thread_func(void *arg) {
         pthread_barrier_wait(&sched->barrier_end); //Esperar a que se termine el procesamiento del tick
     }
     return NULL;
+}
+
+static void print_verbose_status(Scheduler *sched) {
+    if (!sched->verbose) {return;}
+
+    printf("\n[T-%04d] === TRAZA DE DEPURACION ===\n", sched->globalTick);
+    
+    // Imprimir uso de CPU
+    if (sched->runningTask != NULL) {
+        printf("  > CPU Ejecutando -> ID: %d | Prioridad: %d | Rafaga Restante: %d | Quantum Usado: %d\n",
+               sched->runningTask->id,
+               sched->runningTask->priority,
+               sched->runningTask->remainingBurst,
+               sched->runningTask->usedQuantum);
+    } else {
+        printf("  > CPU Libre (Sin tarea activa)\n");
+    }
+
+    // Imprimir estado de las colas
+    Queue *colas[] = {&sched->queue0, &sched->queue1, &sched->queue2};
+    const char *descripciones[] = {"Prioridad Alta / RR Q=2", "Prioridad Media / RR Q=4", "Prioridad Baja / FCFS"};
+
+    for (int i = 0; i < 3; i++) {
+        printf("  > Cola %d (%s) : [ ", i, descripciones[i]);
+        Node *current = colas[i]->head;
+        while (current != NULL) {
+            printf("%d ", current->task->id);
+            current = current->next;
+        }
+        printf("]\n");
+    }
+    printf("----------------------------------------------------\n");
 }
 
 static void* worker_thread_func(void *arg) {
@@ -80,8 +110,6 @@ static void* worker_thread_func(void *arg) {
                 task->returnTime = task->finishTime - task->arrivalTime;
                 sched->runningTask = NULL;
                 
-                //salida ampliada
-                //if (sched->verbose) {}
                 //Salida estandar
                 printf("[T-%04d] COMPLETED: Sentinel ID: %d -> Turnaround Time: %d ticks\n", sched->globalTick, task->id, task->returnTime);
             }
@@ -102,9 +130,7 @@ static void* worker_thread_func(void *arg) {
                     else if (task->priority == 1) { queue_enqueue(&sched->queue1, task);}
 
                     sched->runningTask = NULL; // Liberar CPU para el siguiente proceso
-                    
-                    //Salida ampliada
-                    //if (sched->verbose) {}
+
                     // Salida estandar
                     printf("[T-%04d] QUANTUM_EXPIRED: SENTINEL %d yields CPU via RR rotation (Q=%d)\n", sched->globalTick, task->id, LimiteQuantum);
                 } else {
@@ -123,8 +149,14 @@ static void* worker_thread_func(void *arg) {
 
             if (Apropiado) {
                 task->state = STATE_INTERRUPTED;
-                if (task->priority == 1) { queue_push_front(&sched->queue1, task); }
-                else if (task->priority == 2) { queue_push_front(&sched->queue2, task); }
+                if (task->priority == 1) { queue_push_front(&sched->queue1, task);}
+                else if (task->priority == 2) { queue_push_front(&sched->queue2, task);}
+
+                //Impimir expropiaciones
+                if (sched->verbose) {
+                    printf("[T-%04d] PREEMPTION: Sentinel %d yields CPU to higher priority task\n", sched->globalTick, task->id);
+                }
+
                 sched->runningTask = NULL;
             }
         }
@@ -148,6 +180,9 @@ static void* worker_thread_func(void *arg) {
             sched->runningTask->usedQuantum++;
             sched->runningTask->remainingBurst--;
         }
+
+        // Imprimir traza detallada
+        print_verbose_status(sched);
 
         // Avanzar reloj
         sched->globalTick++;
@@ -177,6 +212,9 @@ void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose) {
 void scheduler_run(Scheduler *sched) {
     pthread_t hiloMaestro, hiloTrabajador;
 
+    // Primera parte de la salida por consola
+    printf("Fixed parameters: Queue 0 [Q=2] | Queue 1 [Q=4] | Queue 2 [FCFS]\n\n");
+
     // Crear los dos hilos requeridos
     pthread_create(&hiloMaestro, NULL, master_thread_func, sched);
     pthread_create(&hiloTrabajador, NULL, worker_thread_func, sched);
@@ -185,7 +223,6 @@ void scheduler_run(Scheduler *sched) {
     pthread_join(hiloMaestro, NULL);
     pthread_join(hiloTrabajador, NULL);
 
-    printf("Simulación finalizada correctamente.\n");
 }
 
 void scheduler_print_metrics(Scheduler *sched){
