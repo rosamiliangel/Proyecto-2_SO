@@ -2,8 +2,10 @@
 #include <stdlib.h>
 #include "../include/scheduler.h"
 
+// Arreglo de nombres para los tipos de prioridad
 const char *TiposPrioridad[] = {"Command", "Driller", "Heavy"};
 
+// Hilo maestro
 static void* master_thread_func(void *arg) {
     Scheduler *sched = (Scheduler*) arg;
 
@@ -17,7 +19,7 @@ static void* master_thread_func(void *arg) {
         }
         if(sched->runningTask == NULL && queue_is_empty(&sched->queue0) && queue_is_empty(&sched->queue1) && queue_is_empty(&sched->queue2) && !llegadasPendientes){
             pthread_mutex_unlock(&sched->lock);
-            pthread_barrier_wait(&sched->barrier); // <-- ¡Línea obligatoria para liberar al hilo trabajador!
+            pthread_barrier_wait(&sched->barrier); // Sincronización de salida
             pthread_barrier_wait(&sched->barrier_end); // Sincronización de salida
             break;
         }
@@ -28,6 +30,7 @@ static void* master_thread_func(void *arg) {
             if (task->arrivalTime == sched->globalTick && task->state == STATE_NEW) {
                 task->state = STATE_READY;
 
+                // Encolar según prioridad
                 if (task->priority == 0) {queue_enqueue(&sched->queue0,task);}
                 else if (task->priority == 1) {queue_enqueue(&sched->queue1,task);}
                 else if (task->priority == 2) {queue_enqueue(&sched->queue2,task);}
@@ -37,15 +40,16 @@ static void* master_thread_func(void *arg) {
             }
         }
         
-        pthread_mutex_unlock(&sched->lock); // Libere la sección crítica
+        pthread_mutex_unlock(&sched->lock); // Liberar sección crítica
         pthread_barrier_wait(&sched->barrier); // Terminar de agregar procesos, despertar hilo trabajador
         pthread_barrier_wait(&sched->barrier_end); //Esperar a que se termine el procesamiento del tick
     }
     return NULL;
 }
 
+// Impprimir salida de depuración
 static void print_verbose_status(Scheduler *sched) {
-    if (!sched->verbose) {return;}
+    if (!sched->verbose) {return;} // Verificar si se solicito salids ampliada (depuracion)
 
     printf("\n[T-%04d] === TRAZA DE DEPURACION ===\n", sched->globalTick);
     
@@ -76,16 +80,16 @@ static void print_verbose_status(Scheduler *sched) {
     printf("----------------------------------------------------\n");
 }
 
+// Hilo trabajador
 static void* worker_thread_func(void *arg) {
     Scheduler *sched = (Scheduler*) arg;
+
     // Bucle de simulación del planificador
     while(1){
-        // --- Sincronización con la barrera ---
-        // El hilo de CPU espera a que el maestro termine de admitir las llegadas
+        // Sincronizar con la barrera, el hilo trabajor espera a que el maestro termine las llegadas
         pthread_barrier_wait(&sched->barrier);
-        pthread_mutex_lock(&sched->lock);
+        pthread_mutex_lock(&sched->lock); // Protección de la sección crítica
 
-        // Protección de la sección crítica
         // Condición de parada: De no haber tareas activas, ni en colas, salir.
         int llegadasPendientes = 0;
         for(int i = 0; i < sched->totalTasks; i++){
@@ -144,6 +148,8 @@ static void* worker_thread_func(void *arg) {
         if (sched->runningTask != NULL) {
             TCB *task = sched->runningTask;
             int Apropiado = 0;
+
+            // Verificar si hay procesos en colas de mayor prioridad
             if (task->priority > 0 && !queue_is_empty(&sched->queue0)) { Apropiado = 1; }
             if (task->priority == 2 && !queue_is_empty(&sched->queue1)) { Apropiado = 1; }
 
@@ -161,7 +167,7 @@ static void* worker_thread_func(void *arg) {
             }
         }
 
-        // Despacho de procesos
+        // Despachar procesos
         if (sched->runningTask == NULL) {
             if (!queue_is_empty(&sched->queue0)) {sched->runningTask = queue_dequeue(&sched->queue0);}
             else if (!queue_is_empty(&sched->queue1)) {sched->runningTask = queue_dequeue(&sched->queue1);}
@@ -186,13 +192,15 @@ static void* worker_thread_func(void *arg) {
 
         // Avanzar reloj
         sched->globalTick++;
-        pthread_mutex_unlock(&sched->lock);
+        pthread_mutex_unlock(&sched->lock); // Terminar la sección crítica
         pthread_barrier_wait(&sched->barrier_end); // Cierre síncrono del tic
-        // Termina la sección crítica
+
     }
+
     return NULL;
 }
 
+// Inicializar Scheduler
 void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose) {
     queue_init(&sched->queue0);
     queue_init(&sched->queue1);
@@ -205,10 +213,11 @@ void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose) {
     sched->verbose = verbose;
 
     pthread_mutex_init(&sched->lock, NULL);
-    pthread_barrier_init(&sched->barrier, NULL, 2); // 2 hilos: Maestro y CPU
+    pthread_barrier_init(&sched->barrier, NULL, 2); // 2 hilos, el Maestro y el trabajador
     pthread_barrier_init(&sched->barrier_end, NULL, 2);
 }
 
+// Ejecutar Scheduler
 void scheduler_run(Scheduler *sched) {
     pthread_t hiloMaestro, hiloTrabajador;
 
@@ -225,6 +234,7 @@ void scheduler_run(Scheduler *sched) {
 
 }
 
+// Imprimir metricas
 void scheduler_print_metrics(Scheduler *sched){
     int tareasTotales = sched->totalTasks;
 
@@ -246,12 +256,14 @@ void scheduler_print_metrics(Scheduler *sched){
     // Calcular el tiempo de espera promedio
     float tiempoDeEsperaPromedio = tiempoDeEsperaTotal / tareasTotales;
     // Mostrar las metricas
-    printf("\n====== GLOBAL PERFORMANCE METRICS ======\n");
-    printf("Total Simulation Time : %d clock ticks.\n", tiempoTotal);
-    printf("System Throughput : %.2f sentinels/tick.\n", rendimiento);
-    printf("Average Waiting Time : %.2f ticks.\n", tiempoDeEsperaPromedio);
+    printf("\n======================  GLOBAL PERFORMANCE METRICS ==================\n");
+    printf("           - Total Simulation Time : %d clock ticks.\n", tiempoTotal);
+    printf("           - System Throughput     : %.2f sentinels/tick.\n", rendimiento);
+    printf("           - Average Waiting Time  : %.2f ticks.\n", tiempoDeEsperaPromedio);
+    printf("=====================================================================\n");
 }
 
+// Destruir Scheduler
 void scheduler_destroy(Scheduler *sched) {
     queue_clear(&sched->queue0);
     queue_clear(&sched->queue1);

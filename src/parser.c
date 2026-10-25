@@ -5,7 +5,7 @@
 
 #define MAX_LINE_LENGTH 500
 
-// Función para ordenar los centinelas por Tiempo de Llegada
+// Ordenar los centinelas por tiempo de llegada
 static int comparar_tasks_por_llegada(const void *a, const void *b){
     TCB *taskA = *(TCB**)a;
     TCB *taskB = *(TCB**)b;
@@ -17,6 +17,7 @@ static int comparar_tasks_por_llegada(const void *a, const void *b){
     return taskA->priority - taskB->priority;
 }
 
+// Leer archivo de entrada y crear arrglo de TCB
 TCB** parser_parse_file(const char *filename, int *out_count){
     FILE *file = fopen(filename, "r");
     if(!file){
@@ -41,7 +42,7 @@ TCB** parser_parse_file(const char *filename, int *out_count){
         // Ignorar espacios en blanco del inicio
         char *ptr = line;
         while(isspace((unsigned char)*ptr)) ptr++;
-        // Ignorar líneas vacías o comentarios que inician con el #
+        // Ignorar líneas vacías o comentarios indicados con #
         if(*ptr == '#' || *ptr == '\0' || *ptr == '\n') continue;
 
         int arrivalTime, id, priority, totalBurst;
@@ -77,6 +78,7 @@ TCB** parser_parse_file(const char *filename, int *out_count){
     return tasks;
 }
 
+// Liberar la memoria de las tareas
 void parser_free_tasks(TCB **tasks, int count) {
     if(!tasks) return;
     for(int i = 0; i < count; i++){
