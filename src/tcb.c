@@ -3,7 +3,7 @@
 #include "../include/tcb.h"
 
 TCB* tcb_create(int id, int priority, int arrivalTime, int totalBurst) {
-    TCB *task = (TCB*) malloc(sizeof(TCB));
+    TCB *task = (TCB*) malloc(sizeof(TCB)); // Asignar memoria para un TCB
     if (!task) return NULL;
 
     task->id = id;
@@ -22,6 +22,7 @@ TCB* tcb_create(int id, int priority, int arrivalTime, int totalBurst) {
     return task;
 }
 
+// Liberar memoria de un TCB
 void tcb_destroy(TCB *task) {
     if (task) {
         free(task);

@@ -8,13 +8,11 @@ int main(int argc, char *argv[]){
     char *input_file = NULL;
     int verbose = 0;
 
-    // Parseo básico de argumentos CLI
+    // Parseo de argumentos
     for(int i = 1; i < argc; i++){
         if(strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "-verbose") == 0){
             verbose = 1;
-        }else if(strcmp(argv[i], "--input") == 0 && i + 1 < argc){
-            input_file = argv[++i];
-        }
+        }else if(strcmp(argv[i], "--input") == 0 && i + 1 < argc){input_file = argv[++i];}
     }
 
     if(!input_file){
@@ -26,11 +24,11 @@ int main(int argc, char *argv[]){
     TCB **tasks = parser_parse_file(input_file, &task_count);
 
     Scheduler sched;
-    scheduler_init(&sched, tasks, task_count, verbose);
-    scheduler_run(&sched);
+    scheduler_init(&sched, tasks, task_count, verbose); // Inicializar scheduler
+    scheduler_run(&sched); // Ejecutar scheduler
     scheduler_print_metrics(&sched); // Imprimir metricas
-    scheduler_destroy(&sched);
+    scheduler_destroy(&sched); // Liberar recursos scheduler
 
-    parser_free_tasks(tasks, task_count);
+    parser_free_tasks(tasks, task_count); // Liberar recursos
     return EXIT_SUCCESS;
 }

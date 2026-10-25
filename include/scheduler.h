@@ -10,11 +10,11 @@ typedef struct {
     Queue queue2;            // Baja prioridad (FCFS)
     
     TCB **allTasks;          // Arreglo completo de centinelas
-    int totalTasks;          // Cantidad total
+    int totalTasks;          // Cantidad total de tareas
     
     TCB *runningTask;        // Centinela activo en CPU
-    int globalTick;          // Reloj discreto Tg
-    int verbose;             // Muestra trazas en cada tic
+    int globalTick;          // Reloj global
+    int verbose;             // Indica si se debe imprimir la salida de depuracion
     
     pthread_mutex_t lock;
     pthread_barrier_t barrier;

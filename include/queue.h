@@ -14,11 +14,11 @@ typedef struct {
     int size;
 } Queue;
 
-void queue_init(Queue *q);
-int queue_is_empty(Queue *q);
-void queue_enqueue(Queue *q, TCB *task);      // Al final de la cola
-void queue_push_front(Queue *q, TCB *task);   // Al frente (para expropiaciones)
-TCB* queue_dequeue(Queue *q);
-void queue_clear(Queue *q);
+void queue_init(Queue *q);                    // Inicializa la cola
+int queue_is_empty(Queue *q);                 // Verificar si la cola está vacía
+void queue_enqueue(Queue *q, TCB *task);      // Insertar al final de la cola
+void queue_push_front(Queue *q, TCB *task);   // Insertar al frente de la cola (para expropiaciones)
+TCB* queue_dequeue(Queue *q);                 // Eliminar del frente de la cola y liberar memoria del nodo
+void queue_clear(Queue *q);                   // vaciar cola  
 
 #endif
