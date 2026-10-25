@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -Iinclude -pthread
+CFLAGS = -Wall -Wextra -std=c99 -D_GNU_SOURCE -Iinclude -pthread
 TARGET = sentinel-dispatcher
 
 SRCS = src/main.c src/tcb.c src/queue.c src/parser.c src/scheduler.c
