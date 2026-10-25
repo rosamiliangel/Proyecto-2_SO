@@ -43,6 +43,7 @@ int main(int argc, char *argv[]){
     Scheduler sched;
     scheduler_init(&sched, tasks, task_count, verbose);
     scheduler_run(&sched);
+    scheduler_print_metrics(&sched); // Imprimir metricas
     scheduler_destroy(&sched);
 
     parser_free_tasks(tasks, task_count);
