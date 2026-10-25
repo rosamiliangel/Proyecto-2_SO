@@ -7,26 +7,40 @@ const char *TiposPrioridad[] = {"Command", "Perforator", "Heavy"};
 static void* master_thread_func(void *arg) {
     Scheduler *sched = (Scheduler*) arg;
 
-    pthread_mutex_lock(&sched->lock); // Protección de la sección crítica
-    for(int i = 0; i < sched->totalTasks; i++){
-        TCB *task = sched->allTasks[i];
-        // Si el centinela llega en el tic global actual
-        if(task->arrivalTime == sched->globalTick && task->state == STATE_NEW){
-            task->state = STATE_READY;
-            // Enrutar a la cola según su prioridad estricta
-            if(task->priority == 0){
-                queue_enqueue(&sched->queue0, task);
-                if(sched->verbose){ printf("[T-%04d] ARRIVAL: Sentinel ID: %d [Type: Command]\n", sched->globalTick, task->id);}
-            }else if(task->priority == 1){
-                queue_enqueue(&sched->queue1, task);
-                if(sched->verbose){ printf("[T-%04d] ARRIVAL: Sentinel ID: %d [Type: Driller]\n", sched->globalTick, task->id);}
-            }else if (task->priority == 2){
-                queue_enqueue(&sched->queue2, task);
-                if(sched->verbose){ printf("[T-%04d] ARRIVAL: Sentinel ID: %d [Type: Heavy]\n", sched->globalTick, task->id); }
+    while(1) {
+
+        pthread_mutex_lock(&sched->lock); // Protección de la sección crítica
+
+        //condicion de parada
+        int llegadasPendientes = 0;
+        for(int i = 0; i < sched->totalTasks; i++){
+            if(sched->allTasks[i]->state == STATE_NEW){ llegadasPendientes = 1; break; }
+        }
+        if(sched->runningTask == NULL && queue_is_empty(&sched->queue0) && queue_is_empty(&sched->queue1) && queue_is_empty(&sched->queue2) && !llegadasPendientes){
+            pthread_mutex_unlock(&sched->lock);
+            pthread_barrier_wait(&sched->barrier); // <-- ¡Línea obligatoria para liberar al hilo trabajador!
+            break;
+        }
+
+        // LLegada de procesos y encolamiento según prioridad
+        for (int i = 0; i < sched->totalTasks; i++) {
+            TCB *task = sched->allTasks[i];
+            if (task->arrivalTime == sched->globalTick && task->state == STATE_NEW) {
+                task->state = STATE_READY;
+
+                if (task->priority == 0) {queue_enqueue(&sched->queue0,task);}
+                else if (task->priority == 1) {queue_enqueue(&sched->queue1,task);}
+                else if (task->priority == 2) {queue_enqueue(&sched->queue2,task);}
+
+                if (sched->verbose) {printf("[T-%4d] ARRIVAL: Sentinel ID: %d [Type: %10s]\n", sched->globalTick, task->id, TiposPrioridad[task->priority]);}
             }
         }
+        
+        pthread_mutex_unlock(&sched->lock); // Libere la sección crítica
+
+        pthread_barrier_wait(&sched->barrier); //Espera a que el hilo trabajador termine
+        usleep(100); //pausa para asegurar que el hilo trabajador tome el lock
     }
-    pthread_mutex_unlock(&sched->lock); // Libere la sección crítica
 
     return NULL;
 }
@@ -39,134 +53,16 @@ static void* worker_thread_func(void *arg) {
         // El hilo de CPU espera a que el maestro termine de admitir las llegadas
         pthread_barrier_wait(&sched->barrier);
         pthread_mutex_lock(&sched->lock);
+
         // Protección de la sección crítica
         // Condición de parada: De no haber tareas activas, ni en colas, salir.
-        if(sched->runningTask == NULL && queue_is_empty(&sched->queue0) && queue_is_empty(&sched->queue1) && queue_is_empty(&sched->queue2)){
-            // Verificar si se han completado todas las tareas
-            int llegadasPendientes = 0;
-            for(int i = 0; i < sched->totalTasks; i++){
-                if(sched->allTasks[i]->state == STATE_NEW){
-                    llegadasPendientes = 1;
-                    break;
-                }
-            }
-            if(!llegadasPendientes){
-                pthead_mutex_unlock(&sched->lock);
-                break; // Salir del bucle y terminar el hilo
-            }
+        int llegadasPendientes = 0;
+        for(int i = 0; i < sched->totalTasks; i++){
+            if(sched->allTasks[i]->state == STATE_NEW){ llegadasPendientes = 1; break; }
         }
-        // --- Exprociación ---
-        // Si hay una tarea ejecutándose en una cola de menor prioridad y llega algo de una cola de mayor prioridad
-        if(sched->runningTask != NULL && sched->runningTask->priority > 0){
-            int mayorPrioridad = 0;
-            if(sched->runningTask->priority == 2 && (!queue_is_empty(&sched->queue0) || !queue_is_empty(&sched->queue1))){ mayorPrioridad = 1;
-            }else if(sched->runningTask->priority == 1 && !queue_is_empty(&sched->queue0)){ mayorPrioridad = 1;}
-            // Si hay una tarea de mayor prioridad en la cola
-            if(mayorPrioridad){
-                TCB *interrumpir = sched->runningTask;
-                interrumpir->state = STATE_INTERRUPTED;
-                // Reingresa a la cabeza de su respectiva cola conservando su progreso
-                if(interrumpir->priority == 1){ queue_push_front(&sched->queue1, interrumpir);
-                }else if(interrumpir->priority == 2){ queue_push_front(&sched->queue2, interrumpir); }
-                // Informar de Interrupción
-                if(sched->verbose){ printf("[T-%04d] PREEMPTED: Sentinel ID: %d displaced by higher priority queue\n", sched->globalTick, interrumpir->id); }
-                sched->runningTask = NULL;
-            }
-        }
-        // --- Despacho ---
-        if(sched->runningTask == NULL){
-            if(!queue_is_empty(&sched->queue0)){ sched->runningTask = queue_dequeue(&sched->queue0);
-            }else if(!queue_is_empty(&sched->queue1)){ sched->runningTask = queue_dequeue(&sched->queue1);
-            }else if(!queue_is_empty(&sched->queue2)){ sched->runningTask = queue_dequeue(&sched->queue2);}
-        }
-
-        if(sched->runningTask != NULL){
-                sched->runningTask->state = STATE_RUNNING;
-                if(sched->runningTask->startTime == -1){ sched->runningTask->startTime = sched->globalTick; }
-        }
-
-        // --- Ejecución y expira el QUANTUM ---
-        if (sched->runningTask != NULL) {
-            TCB *task = sched->runningTask;
-            task->remainingBurst--;
-            task->usedQuantum++;
-
-            if(sched->verbose){ printf("[T-%04d] RUNNING: Sentinel ID: %d (Remaining Burst: %d, Quantum: %d)\n", sched->globalTick, task->id, task->remainingBurst, task->usedQuantum); }
-            // Evaluar finalización
-            if(task->remainingBurst == 0){
-                task->state = STATE_FINISHED;
-                task->finishTime = sched->globalTick + 1;
-                task->returnTime = task->finishTime - task->arrivalTime;
-                // Si se completa
-                if(sched->verbose || 1){ printf("[T-%04d] COMPLETED: Sentinel ID: %d -> Turnaround Time: %d ticks\n", sched->globalTick + 1, task->id, task->returnTime); }
-                sched->runningTask = NULL;
-            }else{
-                // Evaluar expiración de Quantum (Round Robin para Cola 0 y Cola 1)
-                int limiteQuantum = (task->priority == 0) ? 2 : (task->priority == 1) ? 4 : 0;
-                if (task->priority != 2 && task->usedQuantum >= limiteQuantum) {
-                    task->usedQuantum = 0;
-                    task->state = STATE_READY;
-                    if (task->priority == 0) { queue_enqueue(&sched->queue0, task);
-                    }else{ queue_enqueue(&sched->queue1, task); }
-                    sched->runningTask = NULL;
-                }
-            }
-        }
-        // --- Avance de Reloj ---
-        sched->globalTick++;
-        pthread_mutex_unlock(&sched->lock);
-        // Termina la sección crítica
-    }
-    return NULL;
-}
-
-void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose) {
-    queue_init(&sched->queue0);
-    queue_init(&sched->queue1);
-    queue_init(&sched->queue2);
-
-    sched->allTasks = tasks;
-    sched->totalTasks = count;
-    sched->runningTask = NULL;
-    sched->globalTick = 0;
-    sched->verbose = verbose;
-
-    pthread_mutex_init(&sched->lock, NULL);
-    pthread_barrier_init(&sched->barrier, NULL, 2); // 2 hilos: Maestro y CPU
-}
-
-/*
-void scheduler_run_oring(Scheduler *sched) {
-    pthread_t hiloMaestro, hiloTrabajador;
-
-    // Crear los dos hilos requeridos
-    pthread_create(&hiloMaestro, NULL, master_thread_func, sched);
-    pthread_create(&hiloTrabajador, NULL, worker_thread_func, sched);
-
-    // Esperar a que terminen la simulación
-    pthread_join(hiloMaestro, NULL);
-    pthread_join(hiloTrabajador, NULL);
-
-    printf("Simulación finalizada correctamente.\n");
-}
-*/
-
-void scheduler_run(Scheduler *sched) {
-    int TareasCompletadas = 0;
-    
-    // LLegada de procesos y encolamiento según prioridad
-    while (TareasCompletadas < sched->totalTasks) {
-        for (int i = 0; i < sched->totalTasks; i++) {
-            TCB *task = sched->allTasks[i];
-            if (task->arrivalTime == sched->globalTick && task->state == STATE_NEW) {
-                task->state = STATE_READY;
-
-                if (task->priority == 0) {queue_enqueue(&sched->queue0,task);}
-                else if (task->priority == 1) {queue_enqueue(&sched->queue1,task);}
-                else if (task->priority == 2) {queue_enqueue(&sched->queue2,task);}
-
-                if (sched->verbose) {printf("[T-%4d] ARRIVAL: Sentinel ID: %d [Type: %10s]\n", sched->globalTick, task->id, task->priority, TiposPrioridad[task->priority]);}
-            }
+        if(sched->runningTask == NULL && queue_is_empty(&sched->queue0) && queue_is_empty(&sched->queue1) && queue_is_empty(&sched->queue2) && !llegadasPendientes){
+            pthread_mutex_unlock(&sched->lock);
+            break;
         }
 
         // Ejecución de procesos
@@ -186,7 +82,6 @@ void scheduler_run(Scheduler *sched) {
                 task->finishTime = sched->globalTick + 1;
                 task->returnTime = task->finishTime - task->arrivalTime;
                 sched->runningTask = NULL;
-                TareasCompletadas++;
                 if (sched->verbose) {printf("[T-%4d] COMPLETED: Sentinel ID: %d\n", sched->globalTick + 1, task->id);}
             }
             else if (LimiteQuantum >0 && task->usedQuantum == LimiteQuantum) {
@@ -221,9 +116,39 @@ void scheduler_run(Scheduler *sched) {
 
         // Avanzar reloj
         sched->globalTick++;
-
+        pthread_mutex_unlock(&sched->lock);
+        // Termina la sección crítica
     }
-    
+    return NULL;
+}
+
+void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose) {
+    queue_init(&sched->queue0);
+    queue_init(&sched->queue1);
+    queue_init(&sched->queue2);
+
+    sched->allTasks = tasks;
+    sched->totalTasks = count;
+    sched->runningTask = NULL;
+    sched->globalTick = 0;
+    sched->verbose = verbose;
+
+    pthread_mutex_init(&sched->lock, NULL);
+    pthread_barrier_init(&sched->barrier, NULL, 2); // 2 hilos: Maestro y CPU
+}
+
+void scheduler_run(Scheduler *sched) {
+    pthread_t hiloMaestro, hiloTrabajador;
+
+    // Crear los dos hilos requeridos
+    pthread_create(&hiloMaestro, NULL, master_thread_func, sched);
+    pthread_create(&hiloTrabajador, NULL, worker_thread_func, sched);
+
+    // Esperar a que terminen la simulación
+    pthread_join(hiloMaestro, NULL);
+    pthread_join(hiloTrabajador, NULL);
+
+    printf("Simulación finalizada correctamente.\n");
 }
 
 void scheduler_print_metrics(Scheduler *sched){
