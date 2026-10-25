@@ -18,10 +18,12 @@ typedef struct {
     
     pthread_mutex_t lock;
     pthread_barrier_t barrier;
+    pthread_barrier_t barrier_end;
 } Scheduler;
 
 void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose);
 void scheduler_run(Scheduler *sched);
+void scheduler_print_metrics(Scheduler *sched);
 void scheduler_destroy(Scheduler *sched);
 
 #endif

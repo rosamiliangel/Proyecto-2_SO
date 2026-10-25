@@ -2,13 +2,12 @@
 #include <stdlib.h>
 #include "../include/scheduler.h"
 
-const char *TiposPrioridad[] = {"Command", "Perforator", "Heavy"};
+const char *TiposPrioridad[] = {"Command", "Driller", "Heavy"};
 
 static void* master_thread_func(void *arg) {
     Scheduler *sched = (Scheduler*) arg;
 
     while(1) {
-
         pthread_mutex_lock(&sched->lock); // Protección de la sección crítica
 
         //condicion de parada
@@ -19,6 +18,7 @@ static void* master_thread_func(void *arg) {
         if(sched->runningTask == NULL && queue_is_empty(&sched->queue0) && queue_is_empty(&sched->queue1) && queue_is_empty(&sched->queue2) && !llegadasPendientes){
             pthread_mutex_unlock(&sched->lock);
             pthread_barrier_wait(&sched->barrier); // <-- ¡Línea obligatoria para liberar al hilo trabajador!
+            pthread_barrier_wait(&sched->barrier_end); // Sincronización de salida
             break;
         }
 
@@ -32,16 +32,17 @@ static void* master_thread_func(void *arg) {
                 else if (task->priority == 1) {queue_enqueue(&sched->queue1,task);}
                 else if (task->priority == 2) {queue_enqueue(&sched->queue2,task);}
 
-                if (sched->verbose) {printf("[T-%4d] ARRIVAL: Sentinel ID: %d [Type: %10s]\n", sched->globalTick, task->id, TiposPrioridad[task->priority]);}
+                // Salida estandar
+                printf("[T-%04d] ARRIVAL: Sentinel ID: %d [Type: %s]\n", sched->globalTick, task->id, TiposPrioridad[task->priority]);
+                // Salida ampliada
+                //if (sched->verbose) {}
             }
         }
         
         pthread_mutex_unlock(&sched->lock); // Libere la sección crítica
-
-        pthread_barrier_wait(&sched->barrier); //Espera a que el hilo trabajador termine
-        usleep(100); //pausa para asegurar que el hilo trabajador tome el lock
+        pthread_barrier_wait(&sched->barrier); // Terminar de agregar procesos, despertar hilo trabajador
+        pthread_barrier_wait(&sched->barrier_end); //Esperar a que se termine el procesamiento del tick
     }
-
     return NULL;
 }
 
@@ -62,45 +63,73 @@ static void* worker_thread_func(void *arg) {
         }
         if(sched->runningTask == NULL && queue_is_empty(&sched->queue0) && queue_is_empty(&sched->queue1) && queue_is_empty(&sched->queue2) && !llegadasPendientes){
             pthread_mutex_unlock(&sched->lock);
+            pthread_barrier_wait(&sched->barrier_end); // Sincronización de salida
             break;
         }
 
         // Ejecución de procesos
         if (sched->runningTask !=NULL) {
             TCB *task = sched->runningTask;
-            task->usedQuantum++;
-            task->remainingBurst--;
 
             int LimiteQuantum = (task->priority == 0) ? 2 : ((task->priority == 1) ? 4: 0);
-            int Apropiado = 0;
-            
-            if (task-> priority > 0 && !queue_is_empty(&sched->queue0)) {Apropiado = 1;}
-            if (task-> priority == 2 && !queue_is_empty(&sched->queue1)) {Apropiado = 1;}
 
+            // Expiración por finalización
             if (task->remainingBurst == 0) {
                 task->state = STATE_FINISHED;
-                task->finishTime = sched->globalTick + 1;
+                task->finishTime = sched->globalTick;
                 task->returnTime = task->finishTime - task->arrivalTime;
                 sched->runningTask = NULL;
-                if (sched->verbose) {printf("[T-%4d] COMPLETED: Sentinel ID: %d\n", sched->globalTick + 1, task->id);}
+                
+                //salida ampliada
+                //if (sched->verbose) {}
+                //Salida estandar
+                printf("[T-%04d] COMPLETED: Sentinel ID: %d -> Turnaround Time: %d ticks\n", sched->globalTick, task->id, task->returnTime);
             }
+            // Expiración por quantum
             else if (LimiteQuantum >0 && task->usedQuantum == LimiteQuantum) {
-                task->usedQuantum = 0;
-                task->state = STATE_READY;
-                if (task->priority == 0) {queue_enqueue(&sched->queue0, task);}
-                else if (task->priority == 1) {queue_enqueue(&sched->queue1, task);}
-                sched->runningTask = NULL;
-                if (sched->verbose) {printf("[T-%4d] QUANTUM_EXPIRED: SENTINEL ID: %d\n", sched->globalTick + 1, task->id);}    
+                int alternar = 0;
+
+                //Verificar si existen procesos en la misma cola
+                if (task->priority == 0 && !queue_is_empty(&sched->queue0)) alternar = 1;
+                if (task->priority == 1 && !queue_is_empty(&sched->queue1)) alternar = 1;
+                
+                // Alternar si hay varios procesos en una sola cola
+                if (alternar) {
+                    task->usedQuantum = 0;
+                    task->state = STATE_READY;
+
+                    if (task->priority == 0) {queue_enqueue(&sched->queue0, task);}
+                    else if (task->priority == 1) { queue_enqueue(&sched->queue1, task);}
+
+                    sched->runningTask = NULL; // Liberar CPU para el siguiente proceso
+                    
+                    //Salida ampliada
+                    //if (sched->verbose) {}
+                    // Salida estandar
+                    printf("[T-%04d] QUANTUM_EXPIRED: SENTINEL %d yields CPU via RR rotation (Q=%d)\n", sched->globalTick, task->id, LimiteQuantum);
+                } else {
+                    // Reiniciar quantum si no hay mas procesos en la misma cola
+                    task->usedQuantum = 0;
+                } 
             }
-            else if (Apropiado) {
+        }
+
+        // Expropiación del CPU
+        if (sched->runningTask != NULL) {
+            TCB *task = sched->runningTask;
+            int Apropiado = 0;
+            if (task->priority > 0 && !queue_is_empty(&sched->queue0)) { Apropiado = 1; }
+            if (task->priority == 2 && !queue_is_empty(&sched->queue1)) { Apropiado = 1; }
+
+            if (Apropiado) {
                 task->state = STATE_INTERRUPTED;
-                if (task->priority == 1) {queue_push_front(&sched->queue1, task);}
-                else if (task->priority == 2) {queue_push_front(&sched->queue2, task);}
+                if (task->priority == 1) { queue_push_front(&sched->queue1, task); }
+                else if (task->priority == 2) { queue_push_front(&sched->queue2, task); }
                 sched->runningTask = NULL;
             }
         }
 
-        //Despacho de procesos
+        // Despacho de procesos
         if (sched->runningTask == NULL) {
             if (!queue_is_empty(&sched->queue0)) {sched->runningTask = queue_dequeue(&sched->queue0);}
             else if (!queue_is_empty(&sched->queue1)) {sched->runningTask = queue_dequeue(&sched->queue1);}
@@ -108,15 +137,22 @@ static void* worker_thread_func(void *arg) {
             
             if (sched->runningTask != NULL) {
                 if (sched->runningTask->startTime == -1) {
-                    sched->runningTask->startTime = sched->globalTick;
-                    sched->runningTask->state = STATE_RUNNING;
+                    sched->runningTask->startTime = sched->globalTick; 
                 }
+                sched->runningTask->state = STATE_RUNNING;
             }
+        }
+
+        // Terminar tic actual
+        if (sched->runningTask != NULL) {
+            sched->runningTask->usedQuantum++;
+            sched->runningTask->remainingBurst--;
         }
 
         // Avanzar reloj
         sched->globalTick++;
         pthread_mutex_unlock(&sched->lock);
+        pthread_barrier_wait(&sched->barrier_end); // Cierre síncrono del tic
         // Termina la sección crítica
     }
     return NULL;
@@ -135,6 +171,7 @@ void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose) {
 
     pthread_mutex_init(&sched->lock, NULL);
     pthread_barrier_init(&sched->barrier, NULL, 2); // 2 hilos: Maestro y CPU
+    pthread_barrier_init(&sched->barrier_end, NULL, 2);
 }
 
 void scheduler_run(Scheduler *sched) {
@@ -153,7 +190,13 @@ void scheduler_run(Scheduler *sched) {
 
 void scheduler_print_metrics(Scheduler *sched){
     int tareasTotales = sched->totalTasks;
-    int tiempoTotal = sched->globalTick; // Valor final de Tg
+
+    // Calcular el tiempo total evaluando el último finishTime
+    int tiempoTotal = 0;
+    for(int i = 0; i < tareasTotales; i++){
+        if(sched->allTasks[i]->finishTime > tiempoTotal){tiempoTotal = sched->allTasks[i]->finishTime;}
+    }
+
     float rendimiento = (float) tareasTotales / tiempoTotal;
     float tiempoDeEsperaTotal = 0;
 
@@ -179,4 +222,5 @@ void scheduler_destroy(Scheduler *sched) {
     
     pthread_mutex_destroy(&sched->lock);
     pthread_barrier_destroy(&sched->barrier);
+    pthread_barrier_destroy(&sched->barrier_end);
 }
