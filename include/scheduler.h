@@ -23,6 +23,7 @@ typedef struct {
 
 void scheduler_init(Scheduler *sched, TCB **tasks, int count, int verbose);
 void scheduler_run(Scheduler *sched);
+void scheduler_print_metrics(Scheduler *sched);
 void scheduler_destroy(Scheduler *sched);
 
 #endif
